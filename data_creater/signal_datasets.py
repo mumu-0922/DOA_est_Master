@@ -113,6 +113,16 @@ class ULA_dataset:
         assert doas.shape[-1] == k and doas.shape == snrs_db.shape, 'error signal setting'
         batch_size = doas.shape[0]
 
+        # ===== 可选：轻量化数据生成（减少内存峰值/减少不必要字段）=====
+        # keep_lists: 指定只“保存/保留”的 list 字段名（其余字段不保存；部分计算也会跳过）
+        # 例：CNN 训练/评测常用 {"ori_scm","enhance_scm","spatial_sp","doa"}（以及 __len__ 用到的 ori_scm）
+        keep_lists = kwargs.pop('keep_lists', None)
+        if keep_lists is not None:
+            keep_lists = set(keep_lists)
+
+        def _keep(name: str) -> bool:
+            return keep_lists is None or name in keep_lists
+
         # calculate best f/lambda of incident signals
         c = 3 * 10 ** 8
         f = in_f or c / (2 * self.d)  # lambda = c/f = 2d
@@ -149,67 +159,114 @@ class ULA_dataset:
         A, signal, noise = A.astype(np.complex64), signal.astype(np.complex64), noise.astype(np.complex64)
         y_t = A @ signal + noise
 
-        # calculate truth_scm
-        ori_truth_scm = A @ batch_diag_matrices(signal_power ** 2) @ A.swapaxes(-1, -2).conj() + np.eye(self.M)
-        ori_truth_scm = 1 / 2 * (ori_truth_scm + ori_truth_scm.swapaxes(-1, -2).conj()) \
-            .astype(np.complex64)  # transform matrix to Hermitian matrix
-        truth_scm = l2_norm(matrix_2_matrix_concat(ori_truth_scm), axes=(-1, -2)).astype(np.complex64)
+        # calculate truth_scm (only when needed)
+        if _keep('ori_truth_scm') or _keep('truth_scm') or _keep('enhance_truth_scm'):
+            ori_truth_scm = A @ batch_diag_matrices(signal_power ** 2) @ A.swapaxes(-1, -2).conj() + np.eye(self.M)
+            ori_truth_scm = 1 / 2 * (ori_truth_scm + ori_truth_scm.swapaxes(-1, -2).conj()) \
+                .astype(np.complex64)  # transform matrix to Hermitian matrix
+            truth_scm = l2_norm(matrix_2_matrix_concat(ori_truth_scm), axes=(-1, -2)).astype(np.complex64)
 
-        self.ori_truth_scm.extend(split_to_list(ori_truth_scm))
-        self.truth_scm.extend(split_to_list(truth_scm))
-        self.enhance_truth_scm.extend(split_to_list(l2_norm(matrix_2_enhance(ori_truth_scm), axes=(-1, -2))))
+            if _keep('ori_truth_scm'):
+                self.ori_truth_scm.extend(split_to_list(ori_truth_scm))
+            if _keep('truth_scm'):
+                self.truth_scm.extend(split_to_list(truth_scm))
+            if _keep('enhance_truth_scm'):
+                self.enhance_truth_scm.extend(split_to_list(l2_norm(matrix_2_enhance(ori_truth_scm), axes=(-1, -2))))
 
         # calculate received ori_scm for classic algorithm, and normalized scm, vec for training
         ori_scm = self.calculate_scm(y_t)
-        scm = self.get_concat_scm(ori_scm)
-        scm_vec = self.get_scm_vec(ori_scm)
-        scm_vec_include_diag = self.get_scm_vec2(ori_scm)
 
-        # add tau_cat_scm
-        tau_cat_scm = np.concatenate([scm[:, 0], scm[:, 1]], axis=1)
-        self.tau_cat_scm.extend(split_to_list(tau_cat_scm[:, None, ...]))
+        # 根据 keep_lists 按需计算/保存，减少内存占用
+        scm = None
+        if _keep('scm') or _keep('tau_cat_scm') or _keep('scm_vec') or _keep('scm_vec_include_diag'):
+            scm = self.get_concat_scm(ori_scm)
 
-        self.y_t.extend(split_to_list(y_t))
+        scm_vec = None
+        if _keep('scm_vec'):
+            scm_vec = self.get_scm_vec(ori_scm)
+
+        scm_vec_include_diag = None
+        if _keep('scm_vec_include_diag'):
+            scm_vec_include_diag = self.get_scm_vec2(ori_scm)
+
+        if _keep('tau_cat_scm'):
+            if scm is None:
+                scm = self.get_concat_scm(ori_scm)
+            tau_cat_scm = np.concatenate([scm[:, 0], scm[:, 1]], axis=1)
+            self.tau_cat_scm.extend(split_to_list(tau_cat_scm[:, None, ...]))
+
+        if _keep('y_t'):
+            self.y_t.extend(split_to_list(y_t))
         # self.x_t.extend(split_to_list(signal))
-        self.ori_scm.extend(split_to_list(ori_scm))
-        self.scm.extend(split_to_list(scm))
-        self.scm_vec.extend(split_to_list(scm_vec))
-        self.scm_vec_include_diag.extend(split_to_list(scm_vec_include_diag))
+        if _keep('ori_scm'):
+            self.ori_scm.extend(split_to_list(ori_scm))
+        if _keep('scm'):
+            if scm is None:
+                scm = self.get_concat_scm(ori_scm)
+            self.scm.extend(split_to_list(scm))
+        if _keep('scm_vec') and scm_vec is not None:
+            self.scm_vec.extend(split_to_list(scm_vec))
+        if _keep('scm_vec_include_diag') and scm_vec_include_diag is not None:
+            self.scm_vec_include_diag.extend(split_to_list(scm_vec_include_diag))
 
-        # calculate sparse signal
-        sp_sparse = self.get_spatial_sp_sparse(doas)
-        cx_t = self.fill_grid(signal, self.signal_grid, sp_sparse)
-
-        self.cx_t.extend(split_to_list(cx_t))
+        # calculate sparse signal (only when needed; memory heavy)
+        if _keep('cx_t'):
+            sp_sparse = self.get_spatial_sp_sparse(doas)
+            cx_t = self.fill_grid(signal, self.signal_grid, sp_sparse)
+            self.cx_t.extend(split_to_list(cx_t))
 
         # developed scheme requires enhance_scm, FFT_scm and so on
-        enhance_scm = l2_norm(matrix_2_enhance(ori_scm), axes=(-1, -2))
-        self.enhance_scm.extend(split_to_list(enhance_scm))
-        self.FFT_scm.extend(self.get_FFT_scm(ori_scm))
+        if _keep('enhance_scm'):
+            enhance_scm = l2_norm(matrix_2_enhance(ori_scm), axes=(-1, -2))
+            self.enhance_scm.extend(split_to_list(enhance_scm))
+        if _keep('FFT_scm'):
+            self.FFT_scm.extend(self.get_FFT_scm(ori_scm))
 
         # get target
-        subspace = self.get_sub_space(A, 'matrix')
-        spatial_sp = self.get_spatial_sp(doas)
+        subspace = None
+        if _keep('subspace'):
+            subspace = self.get_sub_space(A, 'matrix')
+        spatial_sp = None
+        if _keep('spatial_sp'):
+            spatial_sp = self.get_spatial_sp(doas)
         if fill_mode:
             saved_doa = np.concatenate([doas, np.zeros((doas.shape[0], self.max_k - k))], axis=-1, dtype=np.float32)
         else:
             saved_doa = doas
 
-        self.subspace.extend(split_to_list(subspace))
-        self.doa.extend(split_to_list(saved_doa))
-        self.spatial_sp.extend(split_to_list(spatial_sp))
+        if _keep('subspace') and subspace is not None:
+            self.subspace.extend(split_to_list(subspace))
+        if _keep('doa'):
+            self.doa.extend(split_to_list(saved_doa))
+        if _keep('spatial_sp') and spatial_sp is not None:
+            self.spatial_sp.extend(split_to_list(spatial_sp))
 
-        # estimate the number of source
-        k_target = np.concatenate([np.ones((doas.shape[0], k)), np.zeros((doas.shape[0], self.max_k - k))], axis=-1, dtype=np.float32)
-        self.num_k.extend(split_to_list(k_target))
-        sep_k = doas[:, 1:] - doas[:, 0:1]  # used in ASL algorithm
-        if fill_mode:
-            saved_sep_k = np.concatenate([sep_k, np.zeros((doas.shape[0], self.max_k - k + 1))], axis=-1, dtype=np.float32)
-        else:
-            saved_sep_k = sep_k
-        self.sep_k.extend(split_to_list(saved_sep_k))
-        sep_k_spatial = self.get_spatial_sp(sep_k, self.signal_grid - self.signal_grid[0])  # grid of separation
-        self.sep_k_spatial.extend(split_to_list(sep_k_spatial))
+        # estimate the number of source (only when needed)
+        if _keep('num_k'):
+            k_target = np.concatenate(
+                [np.ones((doas.shape[0], k)), np.zeros((doas.shape[0], self.max_k - k))],
+                axis=-1,
+                dtype=np.float32,
+            )
+            self.num_k.extend(split_to_list(k_target))
+
+        if _keep('sep_k') or _keep('sep_k_spatial'):
+            sep_k = doas[:, 1:] - doas[:, 0:1]  # used in ASL algorithm
+
+            if _keep('sep_k'):
+                if fill_mode:
+                    saved_sep_k = np.concatenate(
+                        [sep_k, np.zeros((doas.shape[0], self.max_k - k + 1))],
+                        axis=-1,
+                        dtype=np.float32,
+                    )
+                else:
+                    saved_sep_k = sep_k
+                self.sep_k.extend(split_to_list(saved_sep_k))
+
+            if _keep('sep_k_spatial'):
+                sep_k_spatial = self.get_spatial_sp(sep_k, self.signal_grid - self.signal_grid[0])  # grid of separation
+                self.sep_k_spatial.extend(split_to_list(sep_k_spatial))
 
         return 0
 
