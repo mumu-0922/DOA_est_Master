@@ -48,7 +48,11 @@ def loss_1d_plot(loss_list, tag_list, x_axis, x_axis_label, logy: bool, dir):
 
     ax.set_xlabel(x_axis_label, fontsize=14)
     ax.set_ylabel('RMSE', fontsize=14)
-    ax.set_xlim(x_axis[0], x_axis[-1])
+    # If there is only one x point (e.g., snrs=[-10]), avoid identical xlims warning.
+    if x_axis[0] == x_axis[-1]:
+        ax.set_xlim(x_axis[0] - 1, x_axis[-1] + 1)
+    else:
+        ax.set_xlim(x_axis[0], x_axis[-1])
     ax.set_ylim(0, 45)
 
     ax.xaxis.set_major_locator(ticker.FixedLocator(x_axis))
