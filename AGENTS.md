@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+回答问题都用中文，关键代码也要加中文注释。
+
 ## Project Structure & Module Organization
 
 - `data_creater/`：仿真数据集生成（ULA/UCA、快拍数、SNR 扫描等）。
