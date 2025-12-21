@@ -1,9 +1,10 @@
 import torch.nn as nn
 import torch
+import math
 
 
 class Grid_Based_network(nn.Module):
-    def __init__(self, start_angle=-60, end_angle=60, step=1, threshold=0):
+    def __init__(self, start_angle=-60, end_angle=60, step=1, threshold=0, peak_min_sep_deg: float = 0.0):
         nn.Module.__init__(self)
         # threshold 是寻峰函数中使用的阈值
         # super(Grid_Based_network, self).__init__()
@@ -13,6 +14,9 @@ class Grid_Based_network(nn.Module):
         self.register_buffer('_grid', torch.arange(start_angle, end_angle + 0.0001, step=step))
         self._out_dim = self._grid.shape[0]
         self.threshold = threshold
+        # peak_min_sep_deg：从空间谱提取 k 个 DOA 时的最小角间隔（度）。
+        # 设为 0 表示禁用该约束，保持原先“找局部极大值再取 top-k”的逻辑。
+        self.peak_min_sep_deg = float(peak_min_sep_deg)
 
     @property
     def grid(self):
@@ -27,6 +31,41 @@ class Grid_Based_network(nn.Module):
         assert sp_batch.ndim == 2, ''
         b = sp_batch.shape[0]
         device = sp_batch.device
+
+        # ===== NMS-topk（更稳健）：直接从谱值中选择 k 个峰，并强制最小角间隔 =====
+        # 低 SNR 下模型输出的谱可能存在多个相邻假峰，导致 top-k 全落在同一簇；
+        # 如果真值 DOA 本身满足最小间隔（例如 min_delta_theta=8°），加入该先验可提升多源分辨成功率。
+        if self.peak_min_sep_deg and self.peak_min_sep_deg > 0:
+            if self._grid.numel() < 2:
+                step_deg = 1.0
+            else:
+                step_deg = float((self._grid[1] - self._grid[0]).detach().cpu().item())
+            sep_bins = int(math.ceil(self.peak_min_sep_deg / max(step_deg, 1e-9)))
+
+            sp_work = sp_batch.clone()
+            selected_idx = torch.full((b, k), -1, device=device, dtype=torch.long)
+            selected_score = torch.full((b, k), float("-inf"), device=device, dtype=sp_batch.dtype)
+
+            for t in range(k):
+                score, idx = torch.max(sp_work, dim=-1)  # (b,)
+                selected_idx[:, t] = idx
+                selected_score[:, t] = score
+
+                # suppress around selected peaks (per-sample slicing)
+                for bi in range(b):
+                    center = int(idx[bi].item())
+                    left = max(0, center - sep_bins)
+                    right = min(self.out_dim, center + sep_bins + 1)
+                    sp_work[bi, left:right] = float("-inf")
+
+            succ = (selected_score[:, k - 1] > self.threshold).bool().to(device)
+            theta = self.grid[selected_idx]
+            theta, _ = theta.sort(dim=-1)
+
+            if return_sp:
+                return succ, theta, sp_batch
+            else:
+                return succ, theta
         sp_diff = torch.diff(sp_batch, n=1, dim=-1)
         sp_peak = (sp_diff[:, :-1] >= 0) & (sp_diff[:, 1:] <= 0)  # bool (batch, grid-1)
         sp_peak = torch.cat([torch.zeros((b, 1), device=device, dtype=torch.bool), sp_peak,

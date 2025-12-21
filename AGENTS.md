@@ -98,6 +98,7 @@ PowerShell 续行符是反引号 `` ` ``，不是 `^`（`^` 是 cmd.exe 的）�
 ### 4.3 `article_implement/CNN/`
 - `article_implement/CNN/literature_CNN.py`：论文/基线 CNN 结构（或与文献一致的版本）。
 - `article_implement/CNN/train_snr_sp.py`：按 SNR 训练/验证并可 `--compare` 输出 RMSE 对比图（开题一键对比常用）。
+- `article_implement/CNN/eval_on_opening_testset.py`：在共享 opening test npz 上评测已训练 CNN，并与 MUSIC/ESPRIT 指标合并出开题两张主图（PoR 与 Conditional RMSE）。
 - `article_implement/CNN/train_snr_sp_ideal.py`：理想协方差/理想设置版本的训练脚本（用于上限对照）。
 - `article_implement/CNN/train_snap_sp.py`：按快拍数（snap）训练/验证的实验脚本。
 - `article_implement/CNN/tests_snr.py`：按 SNR 测试/评测脚本（偏实验复现）。
@@ -193,6 +194,7 @@ PowerShell 续行符是反引号 `` ` ``，不是 `^`（`^` 是 cmd.exe 的）�
 - `models/dl_model/CNN/literature_CNN.py`：std_CNN 基线模型（本仓库 CNN 主干）。
 - `models/dl_model/CNN/std_cnn_se.py`：std_CNN + SEBlock（通道注意力）变体。
 - `models/dl_model/CNN/std_cnn_cbam.py`：std_CNN + CBAM（通道+空间注意力）变体。
+- `models/dl_model/CNN/std_cnn_specse.py`：std_CNN + SpectralSE（对输出空间谱做注意力重标定）变体。
 - `models/dl_model/mlp/MLP.py`：MLP 基线模型。
 - `models/dl_model/grid_based_network.py`：grid-based DOA 网络相关封装（输出空间谱/网格分类）。
 - `models/dl_model/weight_init.py`：网络权重初始化工具。
@@ -202,6 +204,7 @@ PowerShell 续行符是反引号 `` ` ``，不是 `^`（`^` 是 cmd.exe 的）�
 
 ### 4.10 `test/`
 - `test/test_file/opening_music_only.py`：开题“最小可行”MUSIC 基线脚本（输出 RMSE 曲线与示例谱图）。
+- `test/test_file/opening_baselines_protocol.py`：开题协议版 baseline（生成共享 test npz，并评测 MUSIC/ESPRIT 输出 PoR(τ) + Conditional RMSE + 曲线图）。
 - `test/test_file/tests_snr.py`：按 SNR 评测脚本（生成结果 CSV/图）。
 - `test/test_file/tests_snap.py`：按快拍数评测脚本。
 - `test/test_file/tests_min_sep.py`：按最小角间隔评测脚本。
@@ -252,3 +255,5 @@ PowerShell 续行符是反引号 `` ` ``，不是 `^`（`^` 是 cmd.exe 的）�
    - 为什么做：传统方法低 SNR 退化（MUSIC 曲线/谱图）  
    - 怎么做：深度模型 + 注意力增强（对比图）  
    - 能不能做出来：脚本一键复现 + 自动出图（可行性证明）
+
+conda run -n DOA python .\eval_on_opening_testset.py --results_dir "D:\aI\DOA_est_Master\results\opening_snap20_k3\M8_k3_T20_grid0p1_rho0_seed2024_sep8_snr-15to10_step5_N1000_20251221-225709" --weights_dir "D:\aI\DOA_est_Master\results\CNN_load_path\std_CNN_M_8_k_3_snap_20_rho_0_in_enhance_scm"--device cuda --tau 2

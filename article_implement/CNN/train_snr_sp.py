@@ -28,6 +28,7 @@ from utils.loss_function import multi_classification_loss
 from models.dl_model.CNN.literature_CNN import std_CNN
 from models.dl_model.CNN.std_cnn_se import std_CNN_SE
 from models.dl_model.CNN.std_cnn_cbam import std_CNN_CBAM
+from models.dl_model.CNN.std_cnn_specse import std_CNN_SpecSE
 
 from utils.early_stop import EarlyStopping
 
@@ -135,6 +136,8 @@ def build_model(model_type: str, M: int):
         return std_CNN_SE(3, M, 121, sp_mode=True), "std_CNN_SE"
     if model_type == "cbam":
         return std_CNN_CBAM(3, M, 121, sp_mode=True), "std_CNN_CBAM"
+    if model_type == "specse":
+        return std_CNN_SpecSE(3, M, 121, sp_mode=True), "std_CNN_SpecSE"
     raise ValueError(f"Unknown model_type: {model_type}")
 
 
@@ -148,6 +151,7 @@ def build_model_v2(
         cbam_reduction: int = 16,
         cbam_spatial_kernel: int = 3,
         cbam_each_stage: bool = True,
+        specse_reduction: int = 16,
 ):
     """
     Build model with a configurable input type / angle grid.
@@ -181,6 +185,15 @@ def build_model_v2(
             cbam_each_stage=cbam_each_stage,
             **common_kwargs,
         ), "std_CNN_CBAM"
+    if model_type == "specse":
+        return std_CNN_SpecSE(
+            in_c,
+            M,
+            out_dims,
+            sp_mode=True,
+            specse_reduction=specse_reduction,
+            **common_kwargs,
+        ), "std_CNN_SpecSE"
     raise ValueError(f"Unknown model_type: {model_type}")
 
 
@@ -233,6 +246,7 @@ def main(args):
             cbam_reduction=args.cbam_reduction,
             cbam_spatial_kernel=args.cbam_spatial_kernel,
             cbam_each_stage=args.cbam_each_stage,
+            specse_reduction=args.specse_reduction,
         )
         save_path = os.path.join(
             args.save_root,
@@ -267,11 +281,19 @@ def main(args):
                 cbam_reduction=args.cbam_reduction,
                 cbam_spatial_kernel=args.cbam_spatial_kernel,
                 cbam_each_stage=args.cbam_each_stage,
+                specse_reduction=args.specse_reduction,
             )
             model.to(args.device)
 
             dataset = ULA_dataset(args.M, start_angle, end_angle, step, args.rho)
             val_dataset = ULA_dataset(args.M, start_angle, end_angle, step, args.rho)
+
+            # 只生成/保留训练与评测必需字段，避免数据生成阶段出现内存峰值（尤其是 y_t、cx_t 等大对象）
+            # - ori_scm: __len__ 依赖它
+            # - args.input_type: 模型输入（enhance_scm 或 scm）
+            # - spatial_sp: 训练标签
+            # - doa: 后续评测需要
+            keep_lists = {"ori_scm", args.input_type, "spatial_sp", "doa"}
             Create_datasets(
                 dataset,
                 args.k,
@@ -280,6 +302,7 @@ def main(args):
                 snap=args.snap,
                 snr=snr,
                 snr_set=args.snr_set,
+                keep_lists=keep_lists,
             )
             Create_datasets(
                 val_dataset,
@@ -289,15 +312,11 @@ def main(args):
                 snap=args.snap,
                 snr=snr,
                 snr_set=args.snr_set,
+                keep_lists=keep_lists,
             )
 
             # Prune unused large lists to reduce RAM peak.
-            # We must keep:
-            # - ori_scm: __len__ uses it
-            # - input_type: model input
-            # - spatial_sp: training label
-            # - doa: evaluation label
-            keep_lists = {"ori_scm", args.input_type, "spatial_sp", "doa"}
+            # Safety: 若其他字段仍被创建（旧数据文件/旧版本），这里再二次清理
             for _ds in (dataset, val_dataset):
                 for name, value in list(_ds.__dict__.items()):
                     if isinstance(value, list) and name not in keep_lists:
@@ -540,7 +559,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0)
 
     # one-click model switch / comparison
-    parser.add_argument('--model', type=str, default='std', choices=['std', 'se', 'cbam'])
+    parser.add_argument('--model', type=str, default='std', choices=['std', 'se', 'cbam', 'specse'])
     parser.add_argument('--compare', action='store_true')
     parser.add_argument('--input_type', type=str, default='enhance_scm', choices=['enhance_scm', 'scm'])
     parser.add_argument('--snr_set', type=int, default=1, choices=[0, 1])
@@ -576,6 +595,8 @@ if __name__ == "__main__":
     parser.add_argument('--cbam_spatial_kernel', type=int, default=3, choices=[3, 7])
     parser.add_argument('--cbam_each_stage', action='store_true', default=True)
     parser.add_argument('--cbam_last_only', dest='cbam_each_stage', action='store_false')
+    # SpectralSE hyper-parameters (only used when --model specse)
+    parser.add_argument('--specse_reduction', type=int, default=16)
 
     # model parameters
     # ...
