@@ -100,7 +100,8 @@ def main():
     if args.exp_name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         loss_suffix = f"_{args.loss_type}" if args.loss_type != 'mse' else ""
-        args.exp_name = f"ca_doa_M{args.M}_k{args.k}_snr{args.snr_min}to{args.snr_max}{loss_suffix}_{timestamp}"
+        attn_suffix = f"_{args.attention}" if args.attention != 'coord' else ""
+        args.exp_name = f"ca_doa_M{args.M}_k{args.k}_snr{args.snr_min}to{args.snr_max}{loss_suffix}{attn_suffix}_{timestamp}"
 
     save_dir = Path(args.save_dir) / args.exp_name
     save_dir.mkdir(parents=True, exist_ok=True)
