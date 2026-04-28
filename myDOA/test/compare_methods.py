@@ -76,6 +76,9 @@ def parse_args():
     parser.add_argument('--min_sep', type=float, default=5.0, help='最小角度间隔')
     parser.add_argument('--tol', type=float, default=2.0, help='成功率判定容差（度），所有源误差<tol才算成功')
     parser.add_argument('--grid_step', type=float, default=1.0, help='CA-DOA-Net的网格步长')
+    parser.add_argument('--refinement', type=str, default='none',
+                        choices=['none', 'parabolic', 'centroid'],
+                        help='深度模型谱峰细化方式；正式评测默认none，与test_snr.py口径一致')
 
     # 模型路径
     parser.add_argument('--ca_doa_weights', type=str,
@@ -305,6 +308,30 @@ def plot_comparison(results_df, save_path):
     print(f"图表已保存: {save_path}")
 
 
+def build_result_record(snr, args, music, esprit, vanilla, ca_doa):
+    """Build one CSV result row with the evaluation protocol attached."""
+    music_rmse, music_sr = music
+    esprit_rmse, esprit_sr = esprit
+    vanilla_rmse, vanilla_sr = vanilla
+    ca_doa_rmse, ca_doa_sr = ca_doa
+
+    return {
+        'snr': snr,
+        'refinement': args.refinement,
+        'min_sep': args.min_sep,
+        'grid_step': args.grid_step,
+        'tol': args.tol,
+        'MUSIC_rmse': music_rmse,
+        'MUSIC_sr': music_sr,
+        'TLS-ESPRIT_rmse': esprit_rmse,
+        'TLS-ESPRIT_sr': esprit_sr,
+        'Vanilla CNN_rmse': vanilla_rmse,
+        'Vanilla CNN_sr': vanilla_sr,
+        'CA-DOA-Net_rmse': ca_doa_rmse,
+        'CA-DOA-Net_sr': ca_doa_sr
+    }
+
+
 def main():
     args = parse_args()
 
@@ -331,6 +358,7 @@ def main():
     # CA-DOA-Net 使用指定的网格步长
     ca_doa_num_classes = int(120 / args.grid_step) + 1
     print(f"CA-DOA-Net 网格步长: {args.grid_step}°, 输出维度: {ca_doa_num_classes}")
+    print(f"深度模型谱峰细化方式: {args.refinement}")
 
     # CA-DOA-Net（有注意力）
     print(f"加载CA-DOA-Net: {args.ca_doa_weights}")
@@ -365,20 +393,17 @@ def main():
         # 测试各方法
         music_rmse, music_sr = test_music(music_estimator, test_data['scm'], test_data['doa'], args.k, args.tol)
         esprit_rmse, esprit_sr = test_tls_esprit(esprit_estimator, test_data['scm'], test_data['doa'], args.k, args.tol)
-        vanilla_rmse, vanilla_sr = test_dl_model(vanilla_cnn_model, test_data['two_channel'], test_data['doa'], args.k, device, grid_step=1.0, tol=args.tol, refinement='parabolic', min_sep=args.min_sep)
-        ca_doa_rmse, ca_doa_sr = test_dl_model(ca_doa_model, test_data['four_channel'], test_data['doa'], args.k, device, grid_step=args.grid_step, tol=args.tol, refinement='parabolic', min_sep=args.min_sep)
+        vanilla_rmse, vanilla_sr = test_dl_model(vanilla_cnn_model, test_data['two_channel'], test_data['doa'], args.k, device, grid_step=1.0, tol=args.tol, refinement=args.refinement, min_sep=args.min_sep)
+        ca_doa_rmse, ca_doa_sr = test_dl_model(ca_doa_model, test_data['four_channel'], test_data['doa'], args.k, device, grid_step=args.grid_step, tol=args.tol, refinement=args.refinement, min_sep=args.min_sep)
 
-        result = {
-            'snr': snr,
-            'MUSIC_rmse': music_rmse,
-            'MUSIC_sr': music_sr,
-            'TLS-ESPRIT_rmse': esprit_rmse,
-            'TLS-ESPRIT_sr': esprit_sr,
-            'Vanilla CNN_rmse': vanilla_rmse,
-            'Vanilla CNN_sr': vanilla_sr,
-            'CA-DOA-Net_rmse': ca_doa_rmse,
-            'CA-DOA-Net_sr': ca_doa_sr
-        }
+        result = build_result_record(
+            snr=snr,
+            args=args,
+            music=(music_rmse, music_sr),
+            esprit=(esprit_rmse, esprit_sr),
+            vanilla=(vanilla_rmse, vanilla_sr),
+            ca_doa=(ca_doa_rmse, ca_doa_sr),
+        )
 
         results.append(result)
 

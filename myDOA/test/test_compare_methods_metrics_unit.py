@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
@@ -27,6 +28,29 @@ class TestCompareMethodsMetrics(unittest.TestCase):
         self.assertEqual(evaluator.call_args.kwargs["tol"], 2.0)
         self.assertEqual(rmse, 1.25)
         self.assertTrue(success)
+
+    def test_default_refinement_is_none(self):
+        with patch.object(sys, "argv", ["compare_methods.py"]):
+            args = compare_methods.parse_args()
+
+        self.assertEqual(args.refinement, "none")
+
+    def test_result_record_includes_evaluation_protocol(self):
+        args = SimpleNamespace(refinement="none", min_sep=5.0, grid_step=1.0, tol=2.0)
+
+        result = compare_methods.build_result_record(
+            snr=-10.0,
+            args=args,
+            music=(11.0, 0.2),
+            esprit=(12.0, 0.3),
+            vanilla=(1.5, 0.8),
+            ca_doa=(1.2, 0.9),
+        )
+
+        self.assertEqual(result["refinement"], "none")
+        self.assertEqual(result["min_sep"], 5.0)
+        self.assertEqual(result["grid_step"], 1.0)
+        self.assertEqual(result["tol"], 2.0)
 
 
 if __name__ == "__main__":
