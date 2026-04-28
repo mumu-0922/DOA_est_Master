@@ -35,6 +35,12 @@ from models.vanilla_cnn import VanillaCNN
 # 传统方法（myDOA内部实现）
 from models.subspace_methods import Music, TLS_ESPRIT
 from utils.doa_evaluation import evaluate_doa_sample
+from utils.peak_search import (
+    min_sep_to_bins,
+    refine_peak_centroid,
+    refine_peak_parabolic,
+    select_peaks_with_suppression,
+)
 
 
 def compute_rmse_with_hungarian(doa_est: np.ndarray, doa_true: np.ndarray, tol: float = 2.0):
@@ -218,109 +224,6 @@ def test_tls_esprit(esprit_estimator, scm_list, doa_true, k, tol=2.0):
     return mean_rmse, success_rate
 
 
-def extract_peaks_with_suppression(spectrum, k, min_sep_bins=3):
-    """
-    Top-K + 抑制窗口策略提取峰值
-
-    选到一个峰后，把它附近 ±w 的区域压掉再选下一个
-    避免同一大峰被选 2~3 次，或肩峰占位
-
-    Args:
-        spectrum: 空间谱 (num_classes,)
-        k: 需要提取的峰值数量
-        min_sep_bins: 抑制窗口大小（网格点数），建议 = ceil(min_sep / grid_step)
-
-    Returns:
-        top_peaks: 提取的峰值索引列表
-    """
-    spectrum_copy = spectrum.copy()
-    top_peaks = []
-
-    for _ in range(k):
-        # 找当前最大值
-        peak_idx = np.argmax(spectrum_copy)
-        top_peaks.append(peak_idx)
-
-        # 抑制该峰附近的区域
-        left = max(0, peak_idx - min_sep_bins)
-        right = min(len(spectrum_copy), peak_idx + min_sep_bins + 1)
-        spectrum_copy[left:right] = -np.inf  # 压掉
-
-    return sorted(top_peaks)
-
-
-def refine_peak_parabolic(spectrum, grid, peak_idx):
-    """
-    三点抛物线插值细化峰值位置（sub-bin refinement）
-
-    对峰值点及其左右邻点拟合抛物线 y = a*x^2 + b*x + c
-    抛物线顶点位置 x_peak = -b/(2a) 给出亚网格偏移
-
-    Args:
-        spectrum: 空间谱
-        grid: 角度网格
-        peak_idx: 峰值索引
-
-    Returns:
-        refined_angle: 细化后的角度
-    """
-    # 边界检查
-    if peak_idx <= 0 or peak_idx >= len(spectrum) - 1:
-        return grid[peak_idx]
-
-    # 取三点
-    y_left = spectrum[peak_idx - 1]
-    y_center = spectrum[peak_idx]
-    y_right = spectrum[peak_idx + 1]
-
-    # 抛物线插值：顶点偏移 delta = (y_left - y_right) / (2 * (y_left - 2*y_center + y_right))
-    denominator = 2 * (y_left - 2 * y_center + y_right)
-
-    if abs(denominator) < 1e-10:
-        return grid[peak_idx]
-
-    delta = (y_left - y_right) / denominator
-
-    # 限制偏移范围在 [-0.5, 0.5] 个网格步长内
-    delta = np.clip(delta, -0.5, 0.5)
-
-    # 计算细化角度
-    grid_step = grid[1] - grid[0] if len(grid) > 1 else 1.0
-    refined_angle = grid[peak_idx] + delta * grid_step
-
-    return refined_angle
-
-
-def refine_peak_centroid(spectrum, grid, peak_idx, window=2):
-    """
-    加权质心法细化峰值位置（原始项目方法）
-
-    在峰值附近的窗口内，用谱值作为权重计算加权质心
-    """
-    if peak_idx <= window or peak_idx >= len(spectrum) - window - 1:
-        return grid[peak_idx]
-
-    # 取峰值附近的窗口
-    left = peak_idx - window
-    right = peak_idx + window + 1
-
-    values = spectrum[left:right]
-    grids = grid[left:right]
-
-    # 确保所有值为正（用于权重）
-    values = np.maximum(values, 0)
-    total = np.sum(values)
-
-    if total < 1e-10:
-        return grid[peak_idx]
-
-    # 加权质心
-    weights = values / total
-    refined_angle = np.sum(weights * grids)
-
-    return refined_angle
-
-
 def test_dl_model(model, four_channel, doa_true, k, device, grid_step=1.0, tol=2.0, refinement='parabolic', min_sep=3.0):
     """
     测试深度学习模型
@@ -335,7 +238,7 @@ def test_dl_model(model, four_channel, doa_true, k, device, grid_step=1.0, tol=2
     model.eval()
 
     # 计算抑制窗口大小
-    min_sep_bins = int(np.ceil(min_sep / grid_step))
+    min_sep_bins = min_sep_to_bins(min_sep, grid_step)
 
     with torch.no_grad():
         inputs = torch.tensor(four_channel).to(device)
@@ -349,7 +252,7 @@ def test_dl_model(model, four_channel, doa_true, k, device, grid_step=1.0, tol=2
         success_count = 0
         for i in range(len(spectrum)):
             # 使用 Top-K + 抑制窗口策略提取峰值
-            top_peaks = extract_peaks_with_suppression(spectrum[i], k, min_sep_bins)
+            top_peaks = select_peaks_with_suppression(spectrum[i], k, min_sep_bins)
 
             # 根据细化方法提取DOA
             if refinement == 'parabolic':
