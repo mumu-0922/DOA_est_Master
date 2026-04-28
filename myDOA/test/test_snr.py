@@ -19,7 +19,7 @@ from datetime import datetime
 
 from data.signal_datasets import DOADataset
 from models.ca_doa_net import CA_DOA_Net, CA_DOA_Net_Light
-from utils.metrics import compute_rmse, compute_success_rate
+from utils.doa_evaluation import evaluate_doa_batch
 
 
 def parse_args():
@@ -35,6 +35,8 @@ def parse_args():
     parser.add_argument('--model', type=str, default='full', choices=['full', 'light'])
     parser.add_argument('--base_channels', type=int, default=64, help='基础通道数')
     parser.add_argument('--num_blocks', type=int, default=4, help='残差块数量')
+    parser.add_argument('--min_sep', type=float, default=5.0, help='峰值搜索最小角度间隔')
+    parser.add_argument('--tol', type=float, default=2.0, help='成功率判定容差（度）')
     parser.add_argument('--device', type=str, default='cuda')
     parser.add_argument('--save_dir', type=str, default='./results', help='保存根目录')
     parser.add_argument('--exp_name', type=str, default=None, help='实验名称（默认从权重路径提取）')
@@ -55,34 +57,38 @@ def test_single_snr(model, snr, args, device):
         seed=42
     )
 
-    rmse_list = []
-    success_list = []
+    pred_doa_list = []
+    target_doa_list = []
+    peak_success_list = []
 
     model.eval()
     with torch.no_grad():
         for i in range(len(dataset)):
             sample = dataset[i]
             inputs = sample['input'].unsqueeze(0).to(device)
-            target_doa = sample['doa'].to(device)
+            target_doa = sample['doa']
 
             # 预测
             spectrum = model(inputs)
-            success, pred_doa = model.spectrum_to_doa(spectrum, args.k, min_sep=5.0)
+            success, pred_doa = model.spectrum_to_doa(spectrum, args.k, min_sep=args.min_sep)
 
-            success_list.append(success.item())
+            pred_doa_list.append(pred_doa.squeeze(0).cpu().numpy())
+            target_doa_list.append(target_doa.numpy())
+            peak_success_list.append(bool(success.item()))
 
-            if success.item():
-                rmse = torch.sqrt(torch.mean((pred_doa.squeeze() - target_doa) ** 2)).item()
-                rmse_list.append(rmse)
-
-    success_rate = np.mean(success_list)
-    mean_rmse = np.mean(rmse_list) if rmse_list else float('nan')
+    metrics = evaluate_doa_batch(
+        np.asarray(pred_doa_list),
+        np.asarray(target_doa_list),
+        peak_success=np.asarray(peak_success_list),
+        tol=args.tol,
+    )
 
     return {
         'snr': snr,
-        'rmse': mean_rmse,
-        'success_rate': success_rate,
-        'num_success': len(rmse_list),
+        'rmse': metrics['rmse'],
+        'success_rate': metrics['success_rate'],
+        'num_success': metrics['num_success'],
+        'num_valid': metrics['num_valid'],
         'num_total': len(dataset)
     }
 
