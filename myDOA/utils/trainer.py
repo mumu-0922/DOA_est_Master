@@ -10,11 +10,24 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau
 from tqdm import tqdm
 import json
-from typing import Optional, Dict
+from typing import Any, Optional, Dict
 from pathlib import Path
 
 from .metrics import MetricTracker
 from .loss_function import CombinedLoss
+
+
+def _to_checkpoint_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _to_checkpoint_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_checkpoint_safe(v) for v in value]
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    return value
 
 
 class EarlyStopping:
@@ -52,7 +65,8 @@ class Trainer:
         self,
         model: nn.Module,
         device: str = 'cuda',
-        save_dir: str = './results'
+        save_dir: str = './results',
+        run_metadata: Optional[Dict[str, Any]] = None
     ):
         self.model = model.to(device)
         self.device = device
@@ -62,7 +76,14 @@ class Trainer:
         self.loss_fn = None
         self.optimizer = None
         self.scheduler = None
-        self.history = {'train_loss': [], 'val_loss': [], 'val_rmse': []}
+        self.run_metadata = run_metadata or {}
+        self.history = {
+            'train_loss': [],
+            'val_loss': [],
+            'val_rmse': [],
+            'val_success_rate': [],
+            'lr': [],
+        }
 
     def compile(
         self,
@@ -182,8 +203,13 @@ class Trainer:
 
         early_stopping = EarlyStopping(patience=early_stopping_patience)
         best_val_loss = float('inf')
+        best_epoch = None
+        last_epoch = 0
+        last_val_metrics = None
 
         for epoch in range(epochs):
+            current_epoch = epoch + 1
+            last_epoch = current_epoch
             print(f"\nEpoch {epoch + 1}/{epochs}")
             print("-" * 40)
 
@@ -194,8 +220,10 @@ class Trainer:
 
             # 验证
             val_metrics = self.validate(val_loader, k)
+            last_val_metrics = val_metrics
             self.history['val_loss'].append(val_metrics['loss'])
             self.history['val_rmse'].append(val_metrics['rmse'])
+            self.history['val_success_rate'].append(val_metrics['success_rate'])
             print(f"Val   - Loss: {val_metrics['loss']:.4f}, RMSE: {val_metrics['rmse']:.4f}, "
                   f"Success: {val_metrics['success_rate']:.2%}")
 
@@ -206,10 +234,20 @@ class Trainer:
                 else:
                     self.scheduler.step()
 
+            current_lr = self.optimizer.param_groups[0]['lr'] if self.optimizer.param_groups else None
+            self.history['lr'].append(current_lr)
+
             # 保存最佳模型
             if save_best and val_metrics['loss'] < best_val_loss:
                 best_val_loss = val_metrics['loss']
-                self.save_checkpoint('best_model.pth')
+                best_epoch = current_epoch
+                self.save_checkpoint(
+                    'best_model.pth',
+                    epoch=current_epoch,
+                    metrics=val_metrics,
+                    best_val_loss=best_val_loss,
+                    best_epoch=best_epoch,
+                )
                 print("  -> Saved best model")
 
             # 早停
@@ -218,17 +256,36 @@ class Trainer:
                 break
 
         # 保存最终模型和历史
-        self.save_checkpoint('final_model.pth')
+        self.save_checkpoint(
+            'final_model.pth',
+            epoch=last_epoch,
+            metrics=last_val_metrics,
+            best_val_loss=best_val_loss if best_val_loss != float('inf') else None,
+            best_epoch=best_epoch,
+        )
         self.save_history()
 
         return self.history
 
-    def save_checkpoint(self, filename: str):
+    def save_checkpoint(
+        self,
+        filename: str,
+        epoch: Optional[int] = None,
+        metrics: Optional[Dict[str, Any]] = None,
+        best_val_loss: Optional[float] = None,
+        best_epoch: Optional[int] = None,
+    ):
         """保存检查点"""
         path = self.save_dir / filename
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'epoch': epoch,
+            'metrics': _to_checkpoint_safe(metrics or {}),
+            'best_val_loss': _to_checkpoint_safe(best_val_loss),
+            'best_epoch': best_epoch,
+            'history': _to_checkpoint_safe(self.history),
+            'run_metadata': _to_checkpoint_safe(self.run_metadata),
         }, path)
 
     def load_checkpoint(self, filename: str):

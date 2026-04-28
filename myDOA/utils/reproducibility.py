@@ -103,8 +103,6 @@ def save_run_metadata(
     filename: str = "run_metadata.json",
 ) -> Path:
     """Write run metadata and a plain command file into an experiment directory."""
-    save_path = Path(save_dir)
-    save_path.mkdir(parents=True, exist_ok=True)
     metadata = build_run_metadata(
         args=args,
         run_type=run_type,
@@ -114,11 +112,21 @@ def save_run_metadata(
         timestamp=timestamp,
         extra=extra,
     )
+    return write_run_metadata(save_dir, metadata, filename=filename)
 
+
+def write_run_metadata(
+    save_dir: str | Path,
+    metadata: Dict[str, Any],
+    filename: str = "run_metadata.json",
+) -> Path:
+    """Write a pre-built metadata record and matching command file."""
+    save_path = Path(save_dir)
+    save_path.mkdir(parents=True, exist_ok=True)
     metadata_path = save_path / filename
     metadata_path.write_text(
         json.dumps(metadata, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    (save_path / "command.txt").write_text(metadata["command"] + "\n", encoding="utf-8")
+    (save_path / "command.txt").write_text(metadata.get("command", "") + "\n", encoding="utf-8")
     return metadata_path

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.reproducibility import build_run_metadata, save_run_metadata
+from utils.reproducibility import build_run_metadata, save_run_metadata, write_run_metadata
 
 
 class TestReproducibilityMetadata(unittest.TestCase):
@@ -52,6 +52,22 @@ class TestReproducibilityMetadata(unittest.TestCase):
             metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
             self.assertEqual(metadata["config"]["seed"], 7)
             self.assertEqual(command_path.read_text(encoding="utf-8"), "compare_methods.py --seed 7\n")
+
+    def test_write_run_metadata_reuses_existing_metadata(self):
+        metadata = {
+            "run_type": "train_ca_doa",
+            "command": "train_ca_doa.py --epochs 1",
+            "config": {"epochs": 1},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata_path = write_run_metadata(tmpdir, metadata)
+
+            written = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+            command = (Path(tmpdir) / "command.txt").read_text(encoding="utf-8")
+
+        self.assertEqual(written, metadata)
+        self.assertEqual(command, "train_ca_doa.py --epochs 1\n")
 
 
 if __name__ == "__main__":

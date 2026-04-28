@@ -3,7 +3,7 @@
 
 包含:
 - MUSIC: 多重信号分类算法
-- ESPRIT: 旋转不变子空间算法
+- TLS-ESPRIT: 总体最小二乘旋转不变子空间算法
 
 参考: models/subspace_model/ 下的实现
 """
@@ -93,9 +93,12 @@ class Music:
         return spectrum.astype(np.float32)
 
 
-class ESPRIT:
+class TLS_ESPRIT:
     """
-    ESPRIT (Estimation of Signal Parameters via Rotational Invariance Techniques) 算法
+    TLS-ESPRIT (Total Least Squares ESPRIT) 算法
+
+    基于总体最小二乘的旋转不变子空间DOA估计方法，
+    相比LS-ESPRIT对噪声更鲁棒。
 
     Args:
         M: 阵元数量
@@ -117,6 +120,9 @@ class ESPRIT:
         """
         TLS-ESPRIT估计DOA角度
 
+        通过对联合子空间矩阵进行特征分解，同时考虑两个子阵列的误差，
+        比LS-ESPRIT更鲁棒。
+
         Args:
             R: 协方差矩阵 (M, M)
             k: 信源数量
@@ -133,7 +139,7 @@ class ESPRIT:
             U_s1 = U_s[self.sub_arr1, :]
             U_s2 = U_s[self.sub_arr2, :]
 
-            # TLS-ESPRIT
+            # TLS-ESPRIT: 对联合子空间矩阵进行特征分解
             U_s12 = np.concatenate([U_s1, U_s2], axis=1)
             G = U_s12.T.conj() @ U_s12
 
@@ -171,6 +177,8 @@ class ESPRIT:
 
     def _z_to_theta(self, z: np.ndarray) -> np.ndarray:
         """从z计算角度"""
-        # z = exp(-j * 2 * pi * d * sin(theta))
-        # theta = arcsin(angle(z) / (2 * pi * d))
-        return np.rad2deg(np.arcsin(np.angle(z) / (2 * np.pi * self.d)))
+        # z = exp(-j * 2 * pi * d * displacement * sin(theta))
+        # theta = arcsin(-angle(z) / (2 * pi * d * displacement))
+        # 注意：需要负号，因为相位是负的
+        sin_val = -np.angle(z) / (2 * np.pi * self.d * self.displacement)
+        return np.rad2deg(np.arcsin(sin_val))
