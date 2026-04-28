@@ -20,6 +20,7 @@ from datetime import datetime
 from data.signal_datasets import DOADataset
 from models.ca_doa_net import CA_DOA_Net, CA_DOA_Net_Light
 from utils.doa_evaluation import evaluate_doa_batch
+from utils.reproducibility import save_run_metadata
 
 
 def parse_args():
@@ -38,6 +39,7 @@ def parse_args():
     parser.add_argument('--min_sep', type=float, default=5.0, help='峰值搜索最小角度间隔')
     parser.add_argument('--tol', type=float, default=2.0, help='成功率判定容差（度）')
     parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--seed', type=int, default=42, help='测试数据随机种子')
     parser.add_argument('--save_dir', type=str, default='./results', help='保存根目录')
     parser.add_argument('--exp_name', type=str, default=None, help='实验名称（默认从权重路径提取）')
 
@@ -54,7 +56,7 @@ def test_single_snr(model, snr, args, device):
         snr_range=(snr, snr),  # 固定SNR
         snap=args.snap,
         num_samples=args.num_samples,
-        seed=42
+        seed=args.seed
     )
 
     pred_doa_list = []
@@ -113,6 +115,24 @@ def main():
     # 创建保存目录
     save_dir = Path(args.save_dir) / args.exp_name
     save_dir.mkdir(parents=True, exist_ok=True)
+    save_run_metadata(
+        save_dir=save_dir,
+        args=args,
+        run_type='test_snr',
+        extra={
+            'weights': args.weights,
+            'outputs': {
+                'csv': 'snr_test_results.csv',
+                'figure': 'snr_test_results.png',
+            },
+            'evaluation': {
+                'peak_search': 'GridBasedNetwork.spectrum_to_doa',
+                'refinement': 'none',
+                'min_sep': args.min_sep,
+                'tol': args.tol,
+            },
+        },
+    )
 
     # 加载模型
     print("加载模型...")

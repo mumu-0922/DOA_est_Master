@@ -41,6 +41,7 @@ from utils.peak_search import (
     refine_peak_parabolic,
     select_peaks_with_suppression,
 )
+from utils.reproducibility import save_run_metadata
 
 
 def compute_rmse_with_hungarian(doa_est: np.ndarray, doa_true: np.ndarray, tol: float = 2.0):
@@ -346,6 +347,27 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_dir = Path(args.save_dir) / f"compare_{timestamp}"
     save_dir.mkdir(parents=True, exist_ok=True)
+    save_run_metadata(
+        save_dir=save_dir,
+        args=args,
+        run_type='compare_methods',
+        extra={
+            'weights': {
+                'ca_doa': args.ca_doa_weights,
+                'vanilla_cnn': args.vanilla_cnn_weights,
+            },
+            'outputs': {
+                'csv': 'comparison_results.csv',
+                'figure': 'comparison_plot.png',
+            },
+            'evaluation': {
+                'refinement': args.refinement,
+                'min_sep': args.min_sep,
+                'grid_step': args.grid_step,
+                'tol': args.tol,
+            },
+        },
+    )
 
     # 初始化传统方法
     print("\n初始化算法...")
