@@ -1,0 +1,10 @@
+文献,年份,方法,输入,输出,SNR设置,优点,缺点,对我论文的作用,状态
+MUSIC 经典文献,[VERIFY],子空间谱估计,样本协方差矩阵,空间谱/峰值,[VERIFY],传统 DOA 基线,低 SNR 下子空间分离困难,第2章理论基础与第4章传统基线,待补全
+ESPRIT 经典文献,[VERIFY],旋转不变子空间估计,样本协方差矩阵,角度估计,[VERIFY],无需谱峰搜索,低 SNR 与模型误差下性能下降,第2章理论基础与第4章传统基线,待补全
+Deep Networks for Direction-of-Arrival Estimation in Low SNR,[VERIFY],深度网络低 SNR DOA,协方差相关特征,多标签/角度预测,低 SNR,直接支撑低 SNR 深度 DOA 可行性,需核对具体输入输出与数据设置,第1章研究现状,待精读
+DeepMUSIC: Multiple Signal Classification via Deep Learning,[VERIFY],CNN 学习 MUSIC 谱,阵列协方差矩阵,空间谱,需核对,支撑“协方差输入 + 空间谱输出”,与本文注意力机制不同,第3章方法依据,待精读
+Coordinate Attention for Efficient Mobile Network Design,2021,坐标注意力,特征图,增强后的特征图,非 DOA 任务,沿两个一维方向编码位置信息,原论文不是 DOA 场景,第3章坐标注意力依据,已有PDF
+SubspaceNet,[VERIFY],深度学习辅助子空间方法,需核对,需核对,需核对,体现深度 DOA 新趋势,与本文谱输出路线不同,第1章研究现状,待精读
+近年注意力 DOA 论文 1,[VERIFY],注意力 DOA,需核对,需核对,需核对,支撑注意力机制用于 DOA,需避免与本文创新冲突,第1章研究现状,待检索
+近年注意力 DOA 论文 2,[VERIFY],注意力 DOA,需核对,需核对,需核对,支撑注意力机制用于 DOA,需避免与本文创新冲突,第1章研究现状,待检索
+

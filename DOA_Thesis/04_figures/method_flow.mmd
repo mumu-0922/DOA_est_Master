@@ -1,0 +1,8 @@
+flowchart TD
+    A[Array received signal] --> B[Sample covariance matrix]
+    B --> C[Four-channel feature construction]
+    C --> D[CA-DOA-Net]
+    D --> E[Spatial spectrum output]
+    E --> F[Peak search]
+    F --> G[DOA estimates]
+
